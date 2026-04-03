@@ -3,6 +3,13 @@ const cors = require("cors")
 const http = require("http")
 const WebSocket = require("ws")
 const jwt = require("jsonwebtoken")
+const admin = require("firebase-admin")
+
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY)
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+})
 
 const app = express()
 
@@ -24,6 +31,9 @@ password:"123456",
 vehicles:[11]
 }
 ]
+
+// ================= FCM TOKENS =================
+let fcmTokens = []
 
 // ================= AUTH =================
 function auth(req,res,next){
@@ -82,6 +92,19 @@ app.get("/armed/:id", (req, res) => {
   res.json({ armed: armedStatus[id] || false });
 });
 
+// ================= TOKEN REGISTER =================
+app.post("/registerToken", (req,res)=>{
+
+  const token = req.body.token
+
+  if(token && !fcmTokens.includes(token)){
+    fcmTokens.push(token)
+    console.log("Nowy token:", token)
+  }
+
+  res.send("ok")
+})
+
 // ================= STORAGE =================
 const locations = {}
 const vehicleStatus = {}
@@ -128,6 +151,28 @@ vehicle:Number(vehicle)
 })
 }
 
+function sendPush(title, body){
+
+  fcmTokens.forEach(token => {
+
+    admin.messaging().send({
+      token: token,
+      notification: {
+        title: title,
+        body: body
+      }
+    })
+    .then(() => {
+      console.log("Push sent")
+    })
+    .catch(err => {
+      console.log("Push error:", err.message)
+    })
+
+  })
+
+}
+
 // ================= GPS =================
 function handleGps(vehicle,lat,lon){
 
@@ -160,8 +205,8 @@ if (!armedStatus[vehicleId]) {
   return null;
 }
 
-// 🔥 JEŚLI PRZYSZEDŁ GPS → zapis
-if(lat && lon){
+// jeśli przyszedł GPS → zapis
+if(lat !== undefined && lon !== undefined){
 locations[vehicleId] = {
 lat:Number(lat),
 lon:Number(lon)
@@ -189,6 +234,11 @@ broadcast({
 type:"alarm_update",
 alarm
 })
+
+sendPush(
+  "🚨 ALARM " + alarmType,
+  "Pojazd: " + (vehicle ? vehicle.plate : "UNKNOWN")
+)
 
 return alarm
 }
@@ -233,7 +283,7 @@ return res.status(400).send("Missing GPS data")
 res.send("ok")
 })
 
-// 🔥 LOCATION (APP używa tego)
+// LOCATION
 app.get("/location/:id",(req,res)=>{
 const loc = locations[req.params.id]
 
@@ -244,7 +294,7 @@ return res.json({lat:0,lon:0})
 res.json(loc)
 })
 
-// 🔥 ALARM (ESP wysyła tutaj)
+// ALARM
 app.post("/alarm",(req,res)=>{
 
 const { vehicle, type, lat, lon } = req.body
@@ -253,11 +303,9 @@ if(!vehicle || !type){
 return res.status(400).send("Missing alarm data")
 }
 
-// 🔥 zapis alarm + GPS
 handleAlarm(vehicle,type,lat,lon)
 
-// 🔥 dodatkowo update GPS
-if(lat && lon){
+if(lat !== undefined && lon !== undefined){
 handleGps(vehicle,lat,lon)
 }
 
@@ -300,7 +348,7 @@ user.vehicles.includes(v.id)
 res.json(userVehicles)
 })
 
-// ================= LOGIN =================
+// LOGIN
 app.post("/login",(req,res)=>{
 
 const {email,password} = req.body
@@ -323,7 +371,7 @@ res.json({token})
 
 })
 
-// ================= START =================
+// START
 server.listen(3000,"0.0.0.0",()=>{
 console.log("Server running")
 })

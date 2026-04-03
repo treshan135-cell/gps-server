@@ -160,6 +160,13 @@ function sendPush(title, body){
       notification: {
         title: title,
         body: body
+      },
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "alarm_channel"
+        }
       }
     })
     .then(() => {
